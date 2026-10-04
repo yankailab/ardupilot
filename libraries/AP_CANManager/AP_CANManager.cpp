@@ -26,6 +26,7 @@
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_DroneCAN/AP_DroneCAN.h>
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_KATR/AP_KATR.h>
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
 #include <AP_EFI/AP_EFI_NWPMU.h>
@@ -213,6 +214,16 @@ void AP_CANManager::init()
             AP_Param::load_object_from_eeprom((AP_PiccoloCAN*)_drivers[drv_num], AP_PiccoloCAN::var_info);
             break;
 #endif
+#if AP_KATR_ENABLED
+        case AP_CAN::Protocol::KATR:
+            _drivers[drv_num] = NEW_NOTHROW AP_KATR;
+
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::allocation_error("KATR %d", drv_num + 1);
+                continue;
+            }
+            break;
+#endif // AP_KATR_ENABLED
         default:
             continue;
         }

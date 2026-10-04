@@ -1,6 +1,7 @@
 #include "Rover.h"
 
 #include "RC_Channel_Rover.h"
+#include <AP_KATR/AP_KATR.h>
 
 // defining these two macros and including the RC_Channels_VarInfo
 // header defines the parameter information common to all vehicle
@@ -56,6 +57,13 @@ void RC_Channel_Rover::init_aux_function(const AUX_FUNC ch_option, const AuxSwit
     case AUX_FUNC::SAILBOAT_MOTOR_3POS:
         do_aux_function_sailboat_motor_3pos(ch_flag);
         break;
+#if AP_KATR_ENABLED
+    case AUX_FUNC::KATR_ENGINE_STOP:
+    case AUX_FUNC::KATR_SPEED_MODE:
+    case AUX_FUNC::KATR_LEG_MODE:
+        // Wait for a valid RC reading; init_aux() substitutes LOW when no input exists.
+        break;
+#endif
     default:
         RC_Channel::init_aux_function(ch_option, ch_flag);
         break;
@@ -151,6 +159,31 @@ bool RC_Channel_Rover::do_aux_function(const AuxFuncTrigger &trigger)
     const AuxSwitchPos &ch_flag = trigger.pos;
 
     switch (ch_option) {
+#if AP_KATR_ENABLED
+    case AUX_FUNC::KATR_ENGINE_STOP:
+    case AUX_FUNC::KATR_SPEED_MODE:
+    case AUX_FUNC::KATR_LEG_MODE:
+        for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+            AP_KATR *katr = AP_KATR::get_driver(i);
+            if (katr == nullptr) {
+                continue;
+            }
+            switch (ch_option) {
+            case AUX_FUNC::KATR_ENGINE_STOP:
+                katr->set_engine_stop(ch_flag != AuxSwitchPos::LOW);
+                break;
+            case AUX_FUNC::KATR_SPEED_MODE:
+                katr->set_high_speed(ch_flag == AuxSwitchPos::HIGH);
+                break;
+            case AUX_FUNC::KATR_LEG_MODE:
+                katr->set_rough_ground(ch_flag == AuxSwitchPos::HIGH);
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+#endif
     case AUX_FUNC::DO_NOTHING:
         break;
     case AUX_FUNC::SAVE_WP:

@@ -25,6 +25,7 @@
 #include "SRV_Channel.h"
 #include <AP_Logger/AP_Logger.h>
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_KATR/AP_KATR.h>
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS
   #include <AP_CANManager/AP_CANManager.h>
@@ -514,6 +515,15 @@ void SRV_Channels::push()
 #if AP_KDECAN_ENABLED
     if (AP::kdecan() != nullptr) {
         AP::kdecan()->update();
+    }
+#endif
+
+#if AP_KATR_ENABLED
+    for (uint8_t i = 0; i < HAL_MAX_CAN_PROTOCOL_DRIVERS; i++) {
+        AP_KATR *katr = AP_KATR::get_driver(i);
+        if (katr != nullptr) {
+            katr->update();
+        }
     }
 #endif
 

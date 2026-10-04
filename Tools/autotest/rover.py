@@ -5,11 +5,14 @@ AP_FLAKE8_CLEAN
 
 '''
 
+import binascii
 import copy
 import math
 import operator
 import os
 import pathlib
+import socket
+import struct
 import sys
 import time
 
@@ -6321,6 +6324,186 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         self.context_pop()
         self.reboot_sitl()
 
+    def KATR(self):
+        '''Check KATR CAN commands, RC options and motion inhibition'''
+        self.context_push()
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as can_socket:
+            can_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            can_socket.bind(('', int(os.environ.get('SITL_CAN_MCAST_PORT', 57732))))
+            interface = os.environ.get('SITL_MULTICAST_IF_ADDR') or '0.0.0.0'
+            membership = socket.inet_aton('239.65.82.0') + socket.inet_aton(interface)
+            can_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+
+            def drain_can():
+                can_socket.setblocking(False)
+                while True:
+                    try:
+                        can_socket.recv(1024)
+                    except BlockingIOError:
+                        break
+                can_socket.settimeout(0.1)
+
+            def receive_command():
+                self.drain_mav()
+                try:
+                    packet = can_socket.recv(1024)
+                except socket.timeout:
+                    return None
+                if len(packet) != 18:
+                    raise NotAchievedException("Unexpected KATR CAN packet length: %u" % len(packet))
+                magic, crc, flags, can_id = struct.unpack('<HHHI', packet[:10])
+                if magic != 0x2934 or crc != binascii.crc_hqx(packet[4:], 0xffff):
+                    raise NotAchievedException("Invalid SITL CAN packet header or CRC")
+                if flags != 0 or can_id != 0x0f:
+                    raise NotAchievedException("Expected classic CAN standard ID 0x0f, got flags=%u id=%x" %
+                                               (flags, can_id))
+                return struct.unpack('8b', packet[10:])
+
+            def wait_command(steering=0, speed=0, engine=-92, maximum=92, legs=92, timeout=10, duration=0.2):
+                expected = (steering, speed, engine, 0, maximum, legs, 0, 0)
+                drain_can()
+                deadline = time.monotonic() + timeout
+                matching_since = None
+                command = None
+                while time.monotonic() < deadline:
+                    command = receive_command()
+                    if command != expected:
+                        matching_since = None
+                        continue
+                    if matching_since is None:
+                        matching_since = time.monotonic()
+                    if time.monotonic() - matching_since >= duration:
+                        return
+                raise NotAchievedException("KATR command did not settle: want=%s got=%s" % (expected, command))
+
+            locked_up = False
+            try:
+                self.set_parameters({
+                    'CAN_P1_DRIVER': 1,
+                    'CAN_P1_BITRATE': 500000,
+                    'CAN_D1_PROTOCOL': 15,
+                    'SIM_CAN_TYPE1': 1,
+                    'SERVO1_FUNCTION': 26,
+                    'SERVO3_FUNCTION': 70,
+                    'SERVO1_MIN': 1100,
+                    'SERVO1_TRIM': 1450,
+                    'SERVO1_MAX': 1900,
+                    'SERVO3_MIN': 1050,
+                    'SERVO3_TRIM': 1550,
+                    'SERVO3_MAX': 1950,
+                    'RC1_DZ': 0,
+                    'RC3_DZ': 0,
+                    'RC10_OPTION': 0,
+                    'RC11_OPTION': 251,
+                    'RC12_OPTION': 252,
+                    'RC9_OPTION': 31,
+                    'MOT_SLEWRATE': 0,
+                    'FS_THR_ENABLE': 1,
+                    'FS_ACTION': 2,
+                    'FS_TIMEOUT': 1,
+                })
+                self.set_rc_from_map({1: 1500, 3: 1500, 9: 1000, 10: 1000, 11: 1000, 12: 1000})
+                self.reboot_sitl()
+
+                self.start_subtest("Boot with no engine switch holds engine stop")
+                wait_command(engine=92)
+                self.set_parameter('RC10_OPTION', 250)
+                self.set_rc(10, 2000)
+                wait_command(engine=92)
+                self.set_rc(10, 1000)
+                wait_command()
+
+                self.start_subtest("Commands repeat approximately every 30ms")
+                drain_can()
+                timestamps = []
+                deadline = time.monotonic() + 3
+                while len(timestamps) < 21 and time.monotonic() < deadline:
+                    if receive_command() is not None:
+                        timestamps.append(time.monotonic())
+                if len(timestamps) < 21:
+                    raise NotAchievedException("Missing periodic KATR commands")
+                period = (timestamps[-1] - timestamps[0]) / (len(timestamps) - 1)
+                if not 0.020 <= period <= 0.060:
+                    raise NotAchievedException("Unexpected KATR command period: %fs" % period)
+
+                self.change_mode('MANUAL')
+                self.wait_ready_to_arm()
+                self.arm_vehicle()
+                self.start_subtest("Steering/throttle signs and endpoints use final servo outputs")
+                for steer_pwm, speed_pwm, steering, speed in (
+                    (2000, 1500, 68, 0),
+                    (1500, 2000, 0, -68),
+                    (1000, 1500, -68, 0),
+                    (1500, 1000, 0, 68),
+                    (1750, 1750, 34, -34),
+                    (2100, 2100, 68, -68),
+                    (990, 990, -68, 68),
+                    (1500, 1500, 0, 0),
+                ):
+                    self.set_rc_from_map({1: steer_pwm, 3: speed_pwm})
+                    wait_command(steering=steering, speed=speed)
+                self.set_parameters({'SERVO1_REVERSED': 1, 'SERVO3_REVERSED': 1})
+                self.set_rc_from_map({1: 2000, 3: 2000})
+                wait_command(steering=-68, speed=68)
+                self.set_parameters({'SERVO1_REVERSED': 0, 'SERVO3_REVERSED': 0})
+                wait_command(steering=68, speed=-68)
+
+                self.start_subtest("Engine stop inhibits motion at middle and high positions")
+                for pwm in (1500, 2000):
+                    self.set_rc(10, pwm)
+                    wait_command(engine=92)
+                self.set_rc(10, 1000)
+                wait_command(steering=68, speed=-68)
+
+                self.start_subtest("Maximum speed and leg mode use binary switch mappings")
+                for pwm, value in ((2000, -92), (1500, 92), (1000, 92)):
+                    self.set_rc(11, pwm)
+                    wait_command(steering=68, speed=-68, maximum=value)
+                for pwm, value in ((2000, -92), (1500, 92), (1000, 92)):
+                    self.set_rc(12, pwm)
+                    wait_command(steering=68, speed=-68, legs=value)
+
+                self.start_subtest("Hardware safety and motor emergency stop inhibit motion")
+                self.set_safetyswitch_on()
+                wait_command()
+                self.set_safetyswitch_off()
+                wait_command(steering=68, speed=-68)
+                self.set_rc(9, 2000)
+                wait_command(engine=92)
+                self.set_rc(9, 1000)
+                wait_command(steering=68, speed=-68)
+
+                self.start_subtest("Radio loss enters Hold and stops CAN motion")
+                self.set_parameter('SIM_RC_FAIL', 1)
+                self.wait_mode('HOLD')
+                wait_command()
+                self.set_parameter('SIM_RC_FAIL', 0)
+                self.set_rc_from_map({1: 1500, 3: 1500})
+                self.change_mode('MANUAL')
+                self.set_rc_from_map({1: 2000, 3: 2000})
+                wait_command(steering=68, speed=-68)
+
+                self.start_subtest("Disarm inhibits motion with sticks held at their endpoints")
+                self.disarm_vehicle(force=True)
+                wait_command()
+
+                self.start_subtest("Stale main-loop outputs stop motion and engine")
+                self.set_rc_from_map({1: 1500, 3: 1500})
+                self.arm_vehicle()
+                self.set_rc_from_map({1: 2000, 3: 2000})
+                wait_command(steering=68, speed=-68)
+                locked_up = True
+                self.send_cmd_enter_cpu_lockup()
+                wait_command(engine=92, timeout=0.5, duration=0.06)
+            finally:
+                if locked_up:
+                    # A locked main loop cannot service parameter restoration or a MAVLink reboot.
+                    self.reset_SITL_commandline()
+                else:
+                    self.disarm_vehicle(force=True)
+                self.context_pop()
+                self.reboot_sitl()
+
     def assert_mode(self, mode):
         if not self.mode_is(mode):
             raise NotAchievedException("Mode is not %s" % str(mode))
@@ -7809,6 +7992,7 @@ return update()
             self.DepthFinder,
             self.ChangeModeByNumber,
             self.EStopAtBoot,
+            Test(self.KATR, speedup=1),
             self.MAV_CMD_NAV_RETURN_TO_LAUNCH,
             self.StickMixingAuto,
             self.AutoDock,

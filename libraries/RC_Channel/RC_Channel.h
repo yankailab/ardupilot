@@ -412,6 +412,10 @@ public:
         // external projects.  See the SCRIPTING_1 range instead if
         // you are writing a Lua script.
 
+        KATR_ENGINE_STOP =   250,
+        KATR_SPEED_MODE =    251,
+        KATR_LEG_MODE =      252,
+
 #if AP_SCRIPTING_ENABLED
         // inputs for the use of onboard lua scripting
         SCRIPTING_1 =        300,

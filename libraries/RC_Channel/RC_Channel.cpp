@@ -109,6 +109,7 @@ const AP_Param::GroupInfo RC_Channel::var_info[] = {
     // @Param: OPTION
     // @DisplayName: RC input option
     // @Description: Function assigned to this RC channel
+    // @Values{Rover}: 250:KATR Engine Stop (Low permits running),251:KATR Speed Mode (High selects fast),252:KATR Leg Mode (High selects rough ground)
     // @SortValues: AlphabeticalZeroAtTop
     // @Values{Copter, Rover, Plane, Blimp, Sub}: 0:Do Nothing
     // @Values{Copter}: 2:FLIP Mode

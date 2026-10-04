@@ -68,6 +68,7 @@
 
   #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
   #include <AP_DroneCAN/AP_DroneCAN.h>
+  #include <AP_KATR/AP_KATR.h>
 #endif
 
 #include <AP_Logger/AP_Logger.h>
@@ -1351,6 +1352,19 @@ bool AP_Arming::can_checks(bool report)
                         return false;
                     }
 #endif
+                    break;
+                }
+                case AP_CAN::Protocol::KATR: {
+#if AP_KATR_ENABLED
+                    AP_KATR *katr = AP_KATR::get_driver(i);
+                    if (katr == nullptr || !katr->initialized()) {
+                        check_failed(Check::SYSTEM, report, "KATR not initialized");
+                        return false;
+                    }
+#else
+                    check_failed(Check::SYSTEM, report, "KATR not enabled");
+                    return false;
+#endif // AP_KATR_ENABLED
                     break;
                 }
                 case AP_CAN::Protocol::USD1:
