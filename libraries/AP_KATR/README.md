@@ -1,12 +1,12 @@
 # KATR CAN control with ArduPilot Rover
 
-This custom firmware connects Rover steering and throttle outputs to KATR's
+This custom firmware connects Rover steering and throttle outputs to vehicle's
 radio-replacement CAN interface. It sends only standard CAN ID `0x0F` on KATR
 CANBUS **1ch**. Engine stop, maximum-speed mode, and leg mode are assigned through
 ordinary `RCn_OPTION` parameters. The driver has no separate `KATR_*` parameters.
 
-The protocol source is `KATR_CAN_20251125.xlsx`, sections 2, 3, and 6 and the
-`【貼付表】通信仕様` / `【貼付表】メッセージ形式` sheets. The workbook is supplied separately
+The protocol source is sections 2, 3, and 6 and the protocol definition sheets.
+The workbook is supplied separately
 and is not included in this repository. This implementation and guide were
 AI-assisted; a human integrator must review the change and verify it on KATR.
 
@@ -39,7 +39,7 @@ manual:
 1. Shut down KATR before working on its harness. Disconnect the original KATR
    radio receiver harness; its messages would conflict with the replacement
    `0x0F` messages. Insulate the disconnected connector.
-2. Connect the chosen CubeRed CAN port to **KATR CANBUS 1ch**, using CAN H, CAN L,
+2. Connect the chosen CubeRed CAN port to **Vechiel's CANBUS 1ch**, using CAN H, CAN L,
    and the appropriate signal reference according to the board and KATR harness
    drawings. The transmitter receiver used by Rover connects to CubeRed's RC
    input, not to KATR's original CAN receiver connector. Confirm connector
@@ -50,10 +50,10 @@ manual:
    the CubeRed/carrier and harness before adding one. The CubeRedPrimary hardware
    definition configures CAN termination-control pins; confirm the actual
    carrier's termination arrangement and measure the completed, unpowered bus.
-4. Set KATR's external-command operation mode to **normal operation mode**
-   (`通常操作モード`). In the maintenance menu this is value 4, left LED blinking;
+4. Set KATR's external-command operation mode to **normal operation mode**.
+In the maintenance menu this is value 4, left LED blinking;
    follow the workbook's maintenance sequence and power-cycle to retain it.
-5. Set KATR's physical operation-selection switch to **radio** (`プロポ`), indicated
+5. Set KATR's physical operation-selection switch to **radio**, indicated
    by a blinking lamp. This is distinct from selecting the external-command
    operation mode.
 
